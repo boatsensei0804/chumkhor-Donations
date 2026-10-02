@@ -1,0 +1,46 @@
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: ckp_mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: ckp_donations
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - ckp_network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ckp_app
+    restart: unless-stopped
+    ports:
+      - "5173:3000"
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - MONGODB_URI=mongodb://mongodb:27017/ckp_donations
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - ckp_network
+
+volumes:
+  mongodb_data:
+    name: ckp_mongodb_data
+
+networks:
+  ckp_network:
+    name: ckp_network
+    driver: bridge
