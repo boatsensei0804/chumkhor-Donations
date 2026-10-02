@@ -127,10 +127,28 @@ function myFunction() {
 function doGet(e) {
   const params = (e && e.parameter) || {};
 
-  // ถ้าเรียก API ดึงข้อมูล JSON โดยตรง
-  if (params.api === 'state') {
-    const data = getState();
-    return ContentService.createTextOutput(JSON.stringify(data))
+  // ถ้าเรียก API ดึงข้อมูล JSON โดยตรง หรือสั่ง Action ผ่าน GET
+  if (params.api === 'state' || params.action) {
+    let result = {};
+    const action = params.action;
+    if (action === 'addDonation') {
+      result = addDonation(params.donorName, params.amount, params.note, params.showPopup !== 'false');
+    } else if (action === 'deleteDonation') {
+      result = deleteDonation(params.id);
+    } else if (action === 'updateTotal') {
+      result = updateTotal(params.total);
+    } else if (action === 'updateSettings') {
+      try {
+        result = updateSettings(JSON.parse(params.settings || '{}'));
+      } catch (e) {
+        result = getState();
+      }
+    } else if (action === 'resetData') {
+      result = resetData(params.initialTotal, params.initialTitle);
+    } else {
+      result = getState();
+    }
+    return ContentService.createTextOutput(JSON.stringify(result))
       .setMimeType(ContentService.MimeType.JSON);
   }
 

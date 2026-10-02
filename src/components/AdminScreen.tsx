@@ -19,6 +19,11 @@ import {
   KeyRound,
   Image as ImageIcon,
   Clock,
+  Database,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle2,
+  HelpCircle,
 } from 'lucide-react';
 import { DonationItem, AppSettings, BroadcastAction } from '../types';
 import {
@@ -31,7 +36,18 @@ import {
   resetAllStorage,
 } from '../utils/storage';
 import { syncChannel } from '../utils/channel';
-import { apiFetchState, apiAddDonation, apiDeleteDonation, apiUpdateTotal, apiUpdateSettings, apiTriggerPopup, apiReset } from '../utils/api';
+import {
+  apiFetchState,
+  apiAddDonation,
+  apiDeleteDonation,
+  apiUpdateTotal,
+  apiUpdateSettings,
+  apiTriggerPopup,
+  apiReset,
+  getGoogleScriptUrl,
+  setGoogleScriptUrl,
+  apiTestConnection,
+} from '../utils/api';
 
 interface AdminScreenProps {
   onOpenDisplay?: () => void;
@@ -49,6 +65,18 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ onOpenDisplay, onLogou
   const [donationNote, setDonationNote] = useState('');
   const [showPopup, setShowPopup] = useState(true);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Google Sheets Integration State
+  const [googleScriptUrl, setGoogleScriptUrlState] = useState<string>(getGoogleScriptUrl);
+  const [isTestingConnection, setIsTestingConnection] = useState<boolean>(false);
+  const [connectionStatus, setConnectionStatus] = useState<{
+    status: 'idle' | 'success' | 'error';
+    message?: string;
+  }>({
+    status: getGoogleScriptUrl() ? 'success' : 'idle',
+    message: getGoogleScriptUrl() ? 'ระบุ URL ไว้แล้ว' : undefined,
+  });
+  const [showHowToConnect, setShowHowToConnect] = useState<boolean>(false);
 
   // Form State: Direct Total Edit
   const [manualTotal, setManualTotal] = useState<string>(getStoredTotal().toString());
@@ -158,6 +186,82 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ onOpenDisplay, onLogou
       })
       .catch(() => {});
   }, []);
+
+  // Periodic sync from Google Sheet if URL is configured
+  useEffect(() => {
+    const gasUrl = getGoogleScriptUrl();
+    if (!gasUrl) return;
+
+    const interval = setInterval(() => {
+      apiFetchState()
+        .then((state) => {
+          if (state && Array.isArray(state.donations)) {
+            setHistory(state.donations);
+            setTotal(state.total);
+            setManualTotal(state.total.toString());
+            saveStoredHistory(state.donations);
+            saveStoredTotal(state.total);
+          }
+        })
+        .catch(() => {});
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [googleScriptUrl]);
+
+  // Google Sheets Management Handlers
+  const handleSaveGoogleScriptUrl = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const cleanUrl = googleScriptUrl.trim();
+    setGoogleScriptUrl(cleanUrl);
+    setGoogleScriptUrlState(cleanUrl);
+
+    if (!cleanUrl) {
+      setConnectionStatus({ status: 'idle', message: 'ทำงานในโหมดออฟไลน์ (Local Storage)' });
+      triggerSuccess('บันทึกโหมดออฟไลน์เรียบร้อย');
+      return;
+    }
+
+    setIsTestingConnection(true);
+    const res = await apiTestConnection(cleanUrl);
+    setIsTestingConnection(false);
+
+    if (res.success && res.state) {
+      setConnectionStatus({ status: 'success', message: res.message });
+      setTotal(res.state.total);
+      setManualTotal(res.state.total.toString());
+      setHistory(res.state.donations);
+      saveStoredTotal(res.state.total);
+      saveStoredHistory(res.state.donations);
+      triggerSuccess('เชื่อมต่อ Google Sheet สำเร็จและซิงค์ข้อมูลแล้ว!');
+    } else {
+      setConnectionStatus({ status: 'error', message: res.message });
+    }
+  };
+
+  const handleManualSync = async () => {
+    setIsTestingConnection(true);
+    try {
+      const state = await apiFetchState();
+      setTotal(state.total);
+      setManualTotal(state.total.toString());
+      setHistory(state.donations);
+      saveStoredTotal(state.total);
+      saveStoredHistory(state.donations);
+      setConnectionStatus({
+        status: 'success',
+        message: `ซิงค์ล่าสุด: ${new Date().toLocaleTimeString('th-TH')} (${state.donations.length} รายการ)`,
+      });
+      triggerSuccess(`ซิงค์ข้อมูลจาก Google Sheet เรียบร้อย (${state.donations.length} รายการ)`);
+    } catch (err: any) {
+      setConnectionStatus({
+        status: 'error',
+        message: 'ไม่สามารถดึงข้อมูลได้: ' + (err?.message || 'ข้อผิดพลาดเครือข่าย'),
+      });
+    } finally {
+      setIsTestingConnection(false);
+    }
+  };
 
   // 1. Add Donation
   const handleAddDonation = (e: React.FormEvent) => {
@@ -729,15 +833,27 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ onOpenDisplay, onLogou
                   {history.length} รายการ
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={handleExportCSV}
-                className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
-                title="ดาวน์โหลดไฟล์ CSV สำหรับ Excel"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Export CSV</span>
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleManualSync}
+                  disabled={isTestingConnection}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition disabled:opacity-50"
+                  title="ดึงข้อมูลล่าสุดจาก Google Sheet ทันที"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isTestingConnection ? 'animate-spin' : ''}`} />
+                  <span className="hidden sm:inline">ซิงค์ชีต</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportCSV}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                  title="ดาวน์โหลดไฟล์ CSV สำหรับ Excel"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Export CSV</span>
+                </button>
+              </div>
             </div>
 
             {/* List */}
@@ -796,6 +912,132 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ onOpenDisplay, onLogou
                     </div>
                   </div>
                 ))
+              )}
+            </div>
+          </div>
+
+          {/* SECTION: การเชื่อมต่อ Google Sheet (ฐานข้อมูลหลัก) */}
+          <div className="bg-white rounded-2xl p-6 shadow-md border border-slate-200">
+            <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Database className="w-5 h-5 text-emerald-600" />
+                <h2 className="font-bold text-slate-800">เชื่อมต่อ Google Sheet</h2>
+              </div>
+              <a
+                href="https://docs.google.com/spreadsheets/d/1vbMz7XKdLT0pEw5YRnnPtQkklZAPpGaXBbwwF1uJrNY/edit"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition"
+                title="เปิดไฟล์ Google Sheet ในแท็บใหม่"
+              >
+                <span>เปิด Google Sheet</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            </div>
+
+            {/* Connection Status Banner */}
+            <div
+              className={`p-3.5 rounded-xl mb-4 border text-xs flex items-start gap-2.5 transition-all ${
+                connectionStatus.status === 'success'
+                  ? 'bg-emerald-50/90 border-emerald-300 text-emerald-900'
+                  : connectionStatus.status === 'error'
+                  ? 'bg-rose-50/90 border-rose-300 text-rose-900'
+                  : 'bg-amber-50/90 border-amber-300 text-amber-900'
+              }`}
+            >
+              {connectionStatus.status === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+              ) : connectionStatus.status === 'error' ? (
+                <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="font-bold">
+                  {connectionStatus.status === 'success'
+                    ? '🟢 เชื่อมต่อกับ Google Sheet แล้ว'
+                    : connectionStatus.status === 'error'
+                    ? '🔴 การเชื่อมต่อขัดข้อง'
+                    : '🟠 โหมดบันทึกในเครื่อง (Local Storage)'}
+                </p>
+                <p className="text-[11px] mt-0.5 opacity-90">
+                  {connectionStatus.message ||
+                    (googleScriptUrl
+                      ? 'บันทึก URL ไว้แล้ว พร้อมซิงค์ข้อมูลสด'
+                      : 'ข้อมูลกำลังถูกบันทึกเฉพาะในเบราว์เซอร์เครื่องนี้ ระบุ Google Apps Script Web App URL ด้านล่างเพื่อซิงค์ขึ้นชีต')}
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveGoogleScriptUrl} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Google Apps Script Web App URL (ลงท้ายด้วย /exec)
+                </label>
+                <input
+                  type="url"
+                  value={googleScriptUrl}
+                  onChange={(e) => setGoogleScriptUrlState(e.target.value)}
+                  placeholder="https://script.google.com/macros/s/AKfycb.../exec"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 focus:bg-white transition"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="submit"
+                  disabled={isTestingConnection}
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow transition flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  <Database className="w-4 h-4" />
+                  <span>บันทึก URL</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleManualSync}
+                  disabled={isTestingConnection}
+                  className="py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs border border-slate-300 transition flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  title="ทดสอบและดึงข้อมูลจากชีตทันที"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isTestingConnection ? 'animate-spin' : ''}`} />
+                  <span>{isTestingConnection ? 'กำลังตรวจ...' : 'ทดสอบ/ซิงค์'}</span>
+                </button>
+              </div>
+            </form>
+
+            {/* Collapsible How-To Guide */}
+            <div className="mt-4 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowHowToConnect(!showHowToConnect)}
+                className="w-full flex items-center justify-between text-left text-xs font-semibold text-slate-600 hover:text-emerald-700 py-1 transition"
+              >
+                <span className="flex items-center gap-1.5">
+                  <HelpCircle className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>ขั้นตอนการนำ Web App URL มาใส่ (4 ขั้นตอนง่ายๆ)</span>
+                </span>
+                <span className="text-[10px] text-slate-400">{showHowToConnect ? '▲ ซ่อน' : '▼ แสดง'}</span>
+              </button>
+
+              {showHowToConnect && (
+                <div className="mt-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 space-y-2 animate-fadeIn">
+                  <div className="flex gap-2">
+                    <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center flex-shrink-0 text-[11px]">1</span>
+                    <p>เปิด Google Sheet ของโรงเรียน แล้วไปที่เมนู <strong>ส่วนขยาย (Extensions) &gt; Apps Script</strong></p>
+                  </div>
+                  <div className="flex gap-2">
+                    <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center flex-shrink-0 text-[11px]">2</span>
+                    <p>คัดลอกโค้ดจากไฟล์ <code>google-apps-script/Code.gs</code> ไปวางทับในหน้า Apps Script แล้วกดปุ่ม <strong>บันทึก (Save 💾)</strong></p>
+                  </div>
+                  <div className="flex gap-2">
+                    <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center flex-shrink-0 text-[11px]">3</span>
+                    <p>กดปุ่มสีน้ำเงิน <strong>ทำให้ใช้งานได้ (Deploy) &gt; การทำให้ใช้งานได้รายการใหม่ (New deployment)</strong> เลือกประเภท <strong>เว็บแอป (Web app)</strong></p>
+                  </div>
+                  <div className="flex gap-2">
+                    <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center flex-shrink-0 text-[11px]">4</span>
+                    <p>ตั้งค่า <em>ผู้มีสิทธิ์เข้าถึง (Who has access)</em> เป็น <strong>ทุกคน (Anyone)</strong> จากนั้นกด Deploy แล้วคัดลอก URL ที่ลงท้ายด้วย <code>/exec</code> มาวางในช่องด้านบนนี้</p>
+                  </div>
+                </div>
               )}
             </div>
           </div>

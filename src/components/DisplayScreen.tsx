@@ -6,8 +6,8 @@ import { DonorTicker } from './DonorTicker';
 import { CountdownTimer } from './CountdownTimer';
 import { AnimatedBackground } from './AnimatedBackground';
 import { AppSettings, BroadcastAction, DonationItem, PopupPayload } from '../types';
-import { getStoredSettings, getStoredTotal, getStoredHistory } from '../utils/storage';
-import { apiFetchState } from '../utils/api';
+import { getStoredSettings, getStoredTotal, getStoredHistory, saveStoredHistory, saveStoredSettings, saveStoredTotal } from '../utils/storage';
+import { apiFetchState, getGoogleScriptUrl } from '../utils/api';
 import { syncChannel } from '../utils/channel';
 import { soundPlayer } from '../utils/sound';
 import { fireCeremonialConfetti } from '../utils/confetti';
@@ -29,18 +29,84 @@ export const DisplayScreen: React.FC<DisplayScreenProps> = ({ onOpenAdmin }) => 
   const [popupQueue, setPopupQueue] = useState<PopupPayload[]>([]);
   const [currentPopup, setCurrentPopup] = useState<PopupPayload | null>(null);
 
-  // Fetch initial state from server API
+  // Track known donation IDs to prevent duplicate celebration popups
+  const seenDonationIdsRef = useRef<Set<string>>(new Set(donations.map((d) => d.id)));
+  const isFirstFetchRef = useRef<boolean>(true);
+
+  // Periodic polling from Google Sheets / API
   useEffect(() => {
-    apiFetchState()
-      .then((state) => {
+    let isCancelled = false;
+
+    const fetchLatest = async () => {
+      try {
+        const state = await apiFetchState();
+        if (isCancelled || !state) return;
+
+        // First successful fetch: record all IDs without firing popups for historical entries
+        if (isFirstFetchRef.current) {
+          isFirstFetchRef.current = false;
+          setTotal(state.total);
+          setDonations(state.donations);
+          setSettings(state.settings);
+          (state.donations || []).forEach((d) => seenDonationIdsRef.current.add(d.id));
+          return;
+        }
+
+        // Subsequent polls: detect newly added donations
+        const incoming = state.donations || [];
+        const newDonations: DonationItem[] = [];
+
+        incoming.forEach((item) => {
+          if (!seenDonationIdsRef.current.has(item.id)) {
+            seenDonationIdsRef.current.add(item.id);
+            newDonations.push(item);
+          }
+        });
+
+        // Trigger celebration popups for newly added donations
+        if (newDonations.length > 0) {
+          const newPopups: PopupPayload[] = [];
+          newDonations.forEach((item) => {
+            if (item.showPopup !== false) {
+              newPopups.push({
+                id: item.id,
+                donorName: item.donorName,
+                amount: item.amount,
+                timestamp: item.timestamp,
+                duration: (state.settings || settings).popupDurationSeconds || 5,
+              });
+            }
+          });
+          if (newPopups.length > 0) {
+            setPopupQueue((prev) => [...prev, ...newPopups]);
+          }
+        }
+
         setTotal(state.total);
-        setDonations(state.donations);
-        setSettings(state.settings);
-      })
-      .catch(() => {
-        // Fallback: keep localStorage values if server unavailable
-      });
-  }, []);
+        setDonations(incoming);
+        if (state.settings) {
+          setSettings(state.settings);
+        }
+
+        // Save locally for offline backup
+        saveStoredTotal(state.total);
+        saveStoredHistory(incoming);
+        if (state.settings) {
+          saveStoredSettings(state.settings);
+        }
+      } catch (err) {
+        // Quietly maintain state during temporary network glitches
+      }
+    };
+
+    fetchLatest();
+    const interval = setInterval(fetchLatest, 3500);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+    };
+  }, [settings.popupDurationSeconds]);
 
   // Auto-hide controls after inactivity
   const handleMouseMove = useCallback(() => {
@@ -88,6 +154,7 @@ export const DisplayScreen: React.FC<DisplayScreenProps> = ({ onOpenAdmin }) => 
         setTotal(action.payload);
       } else if (action.type === 'ADD_DONATION') {
         const item = action.payload;
+        seenDonationIdsRef.current.add(item.id);
         setTotal((prev) => prev + item.amount);
         setDonations((prev) => [item, ...prev]);
         if (item.showPopup) {
@@ -107,9 +174,11 @@ export const DisplayScreen: React.FC<DisplayScreenProps> = ({ onOpenAdmin }) => 
       } else if (action.type === 'UPDATE_SETTINGS') {
         setSettings(action.payload);
       } else if (action.type === 'DELETE_DONATION') {
+        seenDonationIdsRef.current.delete(action.payload.id);
         setTotal((prev) => Math.max(0, prev - action.payload.deductedAmount));
         setDonations((prev) => prev.filter((d) => d.id !== action.payload.id));
       } else if (action.type === 'RESET_DATA') {
+        seenDonationIdsRef.current.clear();
         setTotal(action.payload.initialTotal);
         setSettings((prev) => ({ ...prev, title: action.payload.initialTitle }));
         setDonations([]);
@@ -119,6 +188,7 @@ export const DisplayScreen: React.FC<DisplayScreenProps> = ({ onOpenAdmin }) => 
         setTotal(action.payload.total);
         setDonations(action.payload.donations);
         setSettings(action.payload.settings);
+        action.payload.donations.forEach((d) => seenDonationIdsRef.current.add(d.id));
       }
     });
 
@@ -161,6 +231,13 @@ export const DisplayScreen: React.FC<DisplayScreenProps> = ({ onOpenAdmin }) => 
           controlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
+        {getGoogleScriptUrl() && (
+          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-600/90 text-white font-medium text-xs shadow-md backdrop-blur border border-emerald-400/50">
+            <span className="w-2 h-2 rounded-full bg-emerald-200 animate-pulse" />
+            <span>เชื่อมต่อ Google Sheet</span>
+          </div>
+        )}
+
         <button
           onClick={() => setSoundMuted(!soundMuted)}
           className="p-2.5 rounded-full bg-white/90 hover:bg-white text-slate-700 shadow-md backdrop-blur border border-white/60 transition-all hover:scale-105"
