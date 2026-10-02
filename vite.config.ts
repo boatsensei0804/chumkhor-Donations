@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  base: './', // รองรับการ deploy บน GitHub Pages (Relative path)
+  base: '/chumkhor-Donations/', // Base path สำหรับ GitHub Pages: https://boatsensei0804.github.io/chumkhor-Donations/
   plugins: [react()],
   server: {
     host: true,
