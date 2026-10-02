@@ -37,13 +37,23 @@ export const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
     if (!ctx) return;
 
     let animationFrameId: number;
-    let width = (canvas.width = window.innerWidth);
-    let height = (canvas.height = window.innerHeight);
+    const getDims = () => {
+      const p = canvas.parentElement;
+      return {
+        w: p?.clientWidth || 512,
+        h: p?.clientHeight || 768,
+      };
+    };
+
+    let { w: width, h: height } = getDims();
+    canvas.width = width;
+    canvas.height = height;
 
     const handleResize = () => {
       if (!canvas) return;
-      width = canvas.width = window.innerWidth;
-      height = canvas.height = window.innerHeight;
+      const dims = getDims();
+      width = canvas.width = dims.w;
+      height = canvas.height = dims.h;
     };
     window.addEventListener('resize', handleResize);
 
@@ -169,7 +179,7 @@ export const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
   }, [enableParticles, isCelebrating]);
 
   return (
-    <div className={`fixed inset-0 overflow-hidden pointer-events-none select-none z-0 ${className}`}>
+    <div className={`absolute inset-0 overflow-hidden pointer-events-none select-none z-0 ${className}`}>
       {/* Background container: fits 100% of the banner so school logo and 32-year logo are never cut off */}
       <div
         className="absolute inset-0 bg-center bg-no-repeat transition-transform"

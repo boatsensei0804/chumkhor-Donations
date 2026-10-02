@@ -559,12 +559,12 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ onOpenDisplay, onLogou
             )}
 
             <button
-              onClick={() => window.open(window.location.pathname + '?screen=display', '_blank')}
+              onClick={() => window.open(window.location.pathname + '?screen=display', 'CKP_Display_512x768', 'width=512,height=768,menubar=no,toolbar=no,location=no,status=no')}
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-amber-950 text-xs sm:text-sm font-bold shadow transition"
-              title="เปิดหน้าจอ Display ในแท็บหรือหน้าต่างใหม่เพื่อนำขึ้นโปรเจกเตอร์"
+              title="เปิดหน้าจอ Display ในขนาด 512×768 พิกเซล สำหรับต่อออกจอ LED หรือโปรเจกเตอร์"
             >
               <ExternalLink className="w-4 h-4" />
-              <span>เปิดจอแสดงผล (โปรเจกเตอร์)</span>
+              <span>เปิดจอแสดงผล (512×768)</span>
             </button>
 
             {onLogout && (
@@ -1047,6 +1047,26 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ onOpenDisplay, onLogou
             <h2 className="font-bold text-slate-800 mb-4 pb-2 border-b border-slate-100 flex items-center gap-2">
               <span>🛠️ การตั้งค่าการแสดงผล</span>
             </h2>
+
+            {/* Display Resolution Note */}
+            <div className="p-3 mb-4 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Monitor className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                <div>
+                  <p className="text-xs font-bold text-slate-800">ขนาดหน้าจอแสดงผล: 512 × 768 พิกเซล</p>
+                  <p className="text-[11px] text-slate-500">สัดส่วนแนวตั้ง 2:3 สำหรับจอ LED / Signage</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => window.open(window.location.pathname + '?screen=display', 'CKP_512x768', 'width=512,height=768,menubar=no,toolbar=no')}
+                className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 text-xs font-bold transition flex items-center gap-1"
+                title="เปิดดูหน้าจอจริงขนาด 512×768 พิกเซล"
+              >
+                <ExternalLink className="w-3 h-3" />
+                <span>เปิดดูจอ</span>
+              </button>
+            </div>
 
             <form onSubmit={handleSaveSettings} className="space-y-4">
               <div>
