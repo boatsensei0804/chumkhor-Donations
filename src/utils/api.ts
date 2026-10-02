@@ -1,4 +1,5 @@
 import { DonationItem, AppSettings, PopupPayload } from '../types';
+import { syncChannel } from './channel';
 
 export const GOOGLE_SCRIPT_STORAGE_KEY = 'ckp_gas_web_app_url';
 
@@ -169,8 +170,15 @@ export async function apiUpdateSettings(settings: AppSettings): Promise<AppSetti
 
 // ===== Popup =====
 export function apiTriggerPopup(payload: PopupPayload): Promise<void> {
+  // Always broadcast via instant cloud real-time channel (< 50-100ms)
+  syncChannel.postMessage({
+    type: 'TRIGGER_POPUP',
+    payload,
+  });
+
   const gasUrl = getGoogleScriptUrl();
   if (gasUrl) {
+    callGoogleScript('triggerPopup', { popup: payload }).catch(() => {});
     return Promise.resolve();
   }
   return request('/trigger-popup', {

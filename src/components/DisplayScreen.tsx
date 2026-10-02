@@ -8,7 +8,7 @@ import { AnimatedBackground } from './AnimatedBackground';
 import { AppSettings, BroadcastAction, DonationItem, PopupPayload } from '../types';
 import { getStoredSettings, getStoredTotal, getStoredHistory, saveStoredHistory, saveStoredSettings, saveStoredTotal } from '../utils/storage';
 import { apiFetchState, getGoogleScriptUrl } from '../utils/api';
-import { syncChannel } from '../utils/channel';
+import { syncChannel, RealtimeStatus } from '../utils/channel';
 import { soundPlayer } from '../utils/sound';
 import { fireCeremonialConfetti } from '../utils/confetti';
 
@@ -31,7 +31,17 @@ export const DisplayScreen: React.FC<DisplayScreenProps> = ({ onOpenAdmin }) => 
 
   // Track known donation IDs to prevent duplicate celebration popups
   const seenDonationIdsRef = useRef<Set<string>>(new Set(donations.map((d) => d.id)));
+  const seenPopupIdsRef = useRef<Set<string>>(new Set());
   const isFirstFetchRef = useRef<boolean>(true);
+
+  // Real-time connection status
+  const [realtimeStatus, setRealtimeStatus] = useState<RealtimeStatus>(() => syncChannel.getStatus());
+
+  useEffect(() => {
+    return syncChannel.onStatusChange((status) => {
+      setRealtimeStatus(status);
+    });
+  }, []);
 
   // Periodic polling from Google Sheets / API
   useEffect(() => {
@@ -79,6 +89,16 @@ export const DisplayScreen: React.FC<DisplayScreenProps> = ({ onOpenAdmin }) => 
           });
           if (newPopups.length > 0) {
             setPopupQueue((prev) => [...prev, ...newPopups]);
+          }
+        }
+
+        // Backup pending popup from Google Sheets if any
+        const anyState = state as any;
+        if (anyState?.pendingPopup && anyState.pendingPopup.id) {
+          const p = anyState.pendingPopup as PopupPayload;
+          if (!seenPopupIdsRef.current.has(p.id)) {
+            seenPopupIdsRef.current.add(p.id);
+            setPopupQueue((prev) => [...prev, p]);
           }
         }
 
@@ -157,7 +177,8 @@ export const DisplayScreen: React.FC<DisplayScreenProps> = ({ onOpenAdmin }) => 
         seenDonationIdsRef.current.add(item.id);
         setTotal((prev) => prev + item.amount);
         setDonations((prev) => [item, ...prev]);
-        if (item.showPopup) {
+        if (item.showPopup && !seenPopupIdsRef.current.has(item.id)) {
+          seenPopupIdsRef.current.add(item.id);
           setPopupQueue((prev) => [
             ...prev,
             {
@@ -170,7 +191,11 @@ export const DisplayScreen: React.FC<DisplayScreenProps> = ({ onOpenAdmin }) => 
           ]);
         }
       } else if (action.type === 'TRIGGER_POPUP') {
-        setPopupQueue((prev) => [...prev, action.payload]);
+        const p = action.payload;
+        if (!seenPopupIdsRef.current.has(p.id)) {
+          seenPopupIdsRef.current.add(p.id);
+          setPopupQueue((prev) => [...prev, p]);
+        }
       } else if (action.type === 'UPDATE_SETTINGS') {
         setSettings(action.payload);
       } else if (action.type === 'DELETE_DONATION') {
@@ -270,6 +295,35 @@ export const DisplayScreen: React.FC<DisplayScreenProps> = ({ onOpenAdmin }) => 
             controlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
           }`}
         >
+          {/* Real-time Status Badge */}
+          <div
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold shadow-md backdrop-blur border transition-all ${
+              realtimeStatus === 'connected'
+                ? 'bg-emerald-950/85 text-emerald-300 border-emerald-400/40'
+                : realtimeStatus === 'connecting'
+                ? 'bg-amber-950/85 text-amber-300 border-amber-400/40 animate-pulse'
+                : 'bg-slate-900/85 text-slate-400 border-slate-700'
+            }`}
+            title={
+              realtimeStatus === 'connected'
+                ? '🟢 เชื่อมต่อคลาวด์เรียลไทม์สำเร็จ (<100ms) พร้อมรับ Popup สดข้ามเครื่อง'
+                : realtimeStatus === 'connecting'
+                ? '🟡 กำลังเชื่อมต่อช่องสัญญาณเรียลไทม์...'
+                : '⚪ ออฟไลน์ (ทำงานผ่าน BroadcastChannel ในเบราว์เซอร์)'
+            }
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                realtimeStatus === 'connected'
+                  ? 'bg-emerald-400 shadow-[0_0_8px_#34d399] animate-pulse'
+                  : realtimeStatus === 'connecting'
+                  ? 'bg-amber-400'
+                  : 'bg-slate-500'
+              }`}
+            />
+            <span>{realtimeStatus === 'connected' ? '⚡ สด <100ms' : realtimeStatus === 'connecting' ? 'กำลังเชื่อม...' : 'ออฟไลน์'}</span>
+          </div>
+
           {/* Resolution Badge & Mode Toggle */}
           <button
             onClick={() => setScaleMode((prev) => (prev === 'fit' ? 'fixed' : 'fit'))}

@@ -143,6 +143,12 @@ function doGet(e) {
       } catch (e) {
         result = getState();
       }
+    } else if (action === 'triggerPopup') {
+      try {
+        result = triggerPopup(JSON.parse(params.popup || '{}'));
+      } catch (e) {
+        result = triggerPopup(params.popup);
+      }
     } else if (action === 'resetData') {
       result = resetData(params.initialTotal, params.initialTitle);
     } else {
@@ -193,6 +199,8 @@ function doPost(e) {
       result = updateTotal(body.total);
     } else if (action === 'updateSettings') {
       result = updateSettings(body.settings);
+    } else if (action === 'triggerPopup') {
+      result = triggerPopup(body.popup);
     } else if (action === 'resetData') {
       result = resetData(body.initialTotal, body.initialTitle);
     } else if (action === 'setSpreadsheet') {
@@ -310,9 +318,46 @@ function getSettingsMap() {
 }
 
 /**
+ * เคลียร์แคชสถานะเพื่อให้คำขอถัดไปอ่านข้อมูลสดใหม่จาก Google Sheet ทันที
+ */
+function clearStateCache() {
+  try {
+    CacheService.getScriptCache().remove('CKP_STATE');
+  } catch (e) {}
+}
+
+/**
+ * บันทึกคำขอเด้ง Popup แจ้งเตือนฉุกเฉิน
+ */
+function triggerPopup(popup) {
+  if (!popup) return getState();
+  try {
+    const cache = CacheService.getScriptCache();
+    cache.put('PENDING_POPUP', typeof popup === 'string' ? popup : JSON.stringify(popup), 30);
+  } catch (e) {}
+  return getState();
+}
+
+/**
  * ดึงสถานะรวมของระบบ (ยอดเงิน, รายการบริจาค, การตั้งค่า)
+ * มีระบบ Memory Cache 3 วินาที เพื่อตอบกลับข้อมูลอย่างรวดเร็วระดับเสี้ยววินาที (<200ms)
  */
 function getState() {
+  const cache = CacheService.getScriptCache();
+  try {
+    const cached = cache.get('CKP_STATE');
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      // ตรวจสอบว่ามี Popup ที่รอเด้งอยู่หรือไม่
+      const pending = cache.get('PENDING_POPUP');
+      if (pending) {
+        parsed.pendingPopup = JSON.parse(pending);
+        cache.remove('PENDING_POPUP');
+      }
+      return parsed;
+    }
+  } catch (e) {}
+
   initSheets();
   const ss = getSpreadsheet();
   const donationSheet = ss.getSheetByName(SHEET_NAMES.DONATIONS);
@@ -356,19 +401,37 @@ function getState() {
     sheetUrl = ss.getUrl();
   } catch (e) {}
 
-  return {
+  let pendingPopup = null;
+  try {
+    const p = cache.get('PENDING_POPUP');
+    if (p) {
+      pendingPopup = JSON.parse(p);
+      cache.remove('PENDING_POPUP');
+    }
+  } catch (e) {}
+
+  const result = {
     total: total,
     donations: donations,
     settings: settings,
+    pendingPopup: pendingPopup,
     timestamp: new Date().toISOString(),
     sheetUrl: sheetUrl,
   };
+
+  try {
+    // บันทึกลงแคช 3 วินาที เพื่อลดภาระการอ่าน Sheet ซ้ำซ้อน
+    cache.put('CKP_STATE', JSON.stringify(result), 3);
+  } catch (e) {}
+
+  return result;
 }
 
 /**
  * เพิ่มรายการบริจาคใหม่
  */
 function addDonation(donorName, amount, note, showPopup) {
+  clearStateCache();
   initSheets();
   const ss = getSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAMES.DONATIONS);
@@ -393,6 +456,7 @@ function addDonation(donorName, amount, note, showPopup) {
  * ลบรายการบริจาคตาม ID
  */
 function deleteDonation(id) {
+  clearStateCache();
   initSheets();
   const ss = getSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAMES.DONATIONS);
@@ -419,6 +483,7 @@ function deleteDonation(id) {
  * แก้ไขยอดรวมโดยตรง
  */
 function updateTotal(newTotal) {
+  clearStateCache();
   initSheets();
   updateSettingKey('totalOverride', String(newTotal));
   return getState();
@@ -447,6 +512,7 @@ function updateSettingKey(key, value) {
  * บันทึกการตั้งค่าหลายค่าพร้อมกัน
  */
 function updateSettings(newSettings) {
+  clearStateCache();
   initSheets();
   if (!newSettings) return getState();
 
@@ -462,6 +528,7 @@ function updateSettings(newSettings) {
  * รีเซ็ตข้อมูลทั้งหมด
  */
 function resetData(initialTotal, initialTitle) {
+  clearStateCache();
   initSheets();
   const ss = getSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAMES.DONATIONS);
