@@ -14,6 +14,16 @@ class SoundPlayer {
     }
   }
 
+  // Pre-unlock audio on user gesture
+  unlockAudio() {
+    try {
+      this.initContext();
+      if (this.audioCtx && this.audioCtx.state === 'suspended') {
+        this.audioCtx.resume();
+      }
+    } catch {}
+  }
+
   // Play peaceful ceremonial bell / singing bowl sound
   playCeremonyBell() {
     try {

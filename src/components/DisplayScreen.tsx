@@ -43,6 +43,24 @@ export const DisplayScreen: React.FC<DisplayScreenProps> = ({ onOpenAdmin }) => 
     });
   }, []);
 
+  // Auto unlock audio on any user interaction
+  useEffect(() => {
+    const handleUserInteraction = () => {
+      soundPlayer.unlockAudio();
+      window.removeEventListener('click', handleUserInteraction);
+      window.removeEventListener('touchstart', handleUserInteraction);
+      window.removeEventListener('keydown', handleUserInteraction);
+    };
+    window.addEventListener('click', handleUserInteraction);
+    window.addEventListener('touchstart', handleUserInteraction);
+    window.addEventListener('keydown', handleUserInteraction);
+    return () => {
+      window.removeEventListener('click', handleUserInteraction);
+      window.removeEventListener('touchstart', handleUserInteraction);
+      window.removeEventListener('keydown', handleUserInteraction);
+    };
+  }, []);
+
   // Periodic polling from Google Sheets / API
   useEffect(() => {
     let isCancelled = false;
@@ -59,6 +77,10 @@ export const DisplayScreen: React.FC<DisplayScreenProps> = ({ onOpenAdmin }) => 
           setDonations(state.donations);
           setSettings(state.settings);
           (state.donations || []).forEach((d) => seenDonationIdsRef.current.add(d.id));
+          const initPopup = (state as any)?.latestPopup || (state as any)?.pendingPopup;
+          if (initPopup?.id) {
+            seenPopupIdsRef.current.add(initPopup.id);
+          }
           return;
         }
 
@@ -77,7 +99,8 @@ export const DisplayScreen: React.FC<DisplayScreenProps> = ({ onOpenAdmin }) => 
         if (newDonations.length > 0) {
           const newPopups: PopupPayload[] = [];
           newDonations.forEach((item) => {
-            if (item.showPopup !== false) {
+            if (item.showPopup !== false && !seenPopupIdsRef.current.has(item.id)) {
+              seenPopupIdsRef.current.add(item.id);
               newPopups.push({
                 id: item.id,
                 donorName: item.donorName,
@@ -94,8 +117,9 @@ export const DisplayScreen: React.FC<DisplayScreenProps> = ({ onOpenAdmin }) => 
 
         // Backup pending popup from Google Sheets if any
         const anyState = state as any;
-        if (anyState?.pendingPopup && anyState.pendingPopup.id) {
-          const p = anyState.pendingPopup as PopupPayload;
+        const backupPopup = anyState?.latestPopup || anyState?.pendingPopup;
+        if (backupPopup && backupPopup.id) {
+          const p = backupPopup as PopupPayload;
           if (!seenPopupIdsRef.current.has(p.id)) {
             seenPopupIdsRef.current.add(p.id);
             setPopupQueue((prev) => [...prev, p]);
@@ -120,7 +144,7 @@ export const DisplayScreen: React.FC<DisplayScreenProps> = ({ onOpenAdmin }) => 
     };
 
     fetchLatest();
-    const interval = setInterval(fetchLatest, 3500);
+    const interval = setInterval(fetchLatest, 2000);
 
     return () => {
       isCancelled = true;

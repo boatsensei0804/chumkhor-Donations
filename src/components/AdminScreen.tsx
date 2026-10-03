@@ -26,6 +26,7 @@ import {
   HelpCircle,
   Zap,
   Radio,
+  Copy,
 } from 'lucide-react';
 import { DonationItem, AppSettings, BroadcastAction } from '../types';
 import {
@@ -355,6 +356,21 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ onOpenDisplay, onLogou
       payload: newTotal,
     });
 
+    if (type === 'ADD') {
+      const adjustPayload = {
+        id: 'adjust-' + Date.now(),
+        donorName: 'ยอดบริจาคสมทบเพิ่มเติม',
+        amount: val,
+        timestamp: new Date().toISOString(),
+        duration: settings.popupDurationSeconds,
+      };
+      syncChannel.postMessage({
+        type: 'TRIGGER_POPUP',
+        payload: adjustPayload,
+      });
+      apiTriggerPopup(adjustPayload).catch(() => {});
+    }
+
     apiUpdateTotal(newTotal).catch(() => {});
 
     triggerSuccess(`${type === 'ADD' ? 'เพิ่มยอด' : 'ลดยอด'} ฿${val.toLocaleString('th-TH')} สำเร็จ (ยอดใหม่: ฿${newTotal.toLocaleString('th-TH')})`);
@@ -592,7 +608,10 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ onOpenDisplay, onLogou
             )}
 
             <button
-              onClick={() => window.open(window.location.pathname + '?screen=display', 'CKP_Display_512x768', 'width=512,height=768,menubar=no,toolbar=no,location=no,status=no')}
+              onClick={() => {
+                const target = window.location.pathname + '?screen=display' + (googleScriptUrl ? '&gasUrl=' + encodeURIComponent(googleScriptUrl) : '');
+                window.open(target, 'CKP_Display_512x768', 'width=512,height=768,menubar=no,toolbar=no,location=no,status=no');
+              }}
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-amber-950 text-xs sm:text-sm font-bold shadow transition"
               title="เปิดหน้าจอ Display ในขนาด 512×768 พิกเซล สำหรับต่อออกจอ LED หรือโปรเจกเตอร์"
             >
@@ -1164,23 +1183,41 @@ export const AdminScreen: React.FC<AdminScreenProps> = ({ onOpenDisplay, onLogou
             </h2>
 
             {/* Display Resolution Note */}
-            <div className="p-3 mb-4 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+            <div className="p-3 mb-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
               <div className="flex items-center gap-2">
                 <Monitor className="w-4 h-4 text-emerald-600 flex-shrink-0" />
                 <div>
                   <p className="text-xs font-bold text-slate-800">ขนาดหน้าจอแสดงผล: 512 × 768 พิกเซล</p>
-                  <p className="text-[11px] text-slate-500">สัดส่วนแนวตั้ง 2:3 สำหรับจอ LED / Signage</p>
+                  <p className="text-[11px] text-slate-500">สัดส่วนแนวตั้ง 2:3 สำหรับจอ LED / Signage / โปรเจกเตอร์</p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => window.open(window.location.pathname + '?screen=display', 'CKP_512x768', 'width=512,height=768,menubar=no,toolbar=no')}
-                className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 text-xs font-bold transition flex items-center gap-1"
-                title="เปิดดูหน้าจอจริงขนาด 512×768 พิกเซล"
-              >
-                <ExternalLink className="w-3 h-3" />
-                <span>เปิดดูจอ</span>
-              </button>
+              <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = window.location.origin + window.location.pathname + '?screen=display' + (googleScriptUrl ? '&gasUrl=' + encodeURIComponent(googleScriptUrl) : '');
+                    navigator.clipboard.writeText(url);
+                    triggerSuccess('คัดลอกลิงก์จอแสดงผลแล้ว! ส่งไปเปิดบนเครื่องแชร์หน้าจอได้ทันที');
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-300 text-xs font-bold transition flex items-center gap-1 shadow-sm"
+                  title="คัดลอกลิงก์พร้อมตั้งค่า Sheet อัตโนมัติ เพื่อส่งไปเปิดบนเครื่องที่แชร์จอ"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>คัดลอกลิงก์แชร์จอ</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = window.location.pathname + '?screen=display' + (googleScriptUrl ? '&gasUrl=' + encodeURIComponent(googleScriptUrl) : '');
+                    window.open(target, 'CKP_512x768', 'width=512,height=768,menubar=no,toolbar=no');
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 text-xs font-bold transition flex items-center gap-1 shadow-sm"
+                  title="เปิดดูหน้าจอจริงขนาด 512×768 พิกเซล"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>เปิดดูจอ</span>
+                </button>
+              </div>
             </div>
 
             <form onSubmit={handleSaveSettings} className="space-y-4">

@@ -330,17 +330,18 @@ function clearStateCache() {
  * บันทึกคำขอเด้ง Popup แจ้งเตือนฉุกเฉิน
  */
 function triggerPopup(popup) {
+  clearStateCache();
   if (!popup) return getState();
   try {
-    const cache = CacheService.getScriptCache();
-    cache.put('PENDING_POPUP', typeof popup === 'string' ? popup : JSON.stringify(popup), 30);
+    const payloadStr = typeof popup === 'string' ? popup : JSON.stringify(popup);
+    PropertiesService.getScriptProperties().setProperty('LATEST_POPUP', payloadStr);
   } catch (e) {}
   return getState();
 }
 
 /**
  * ดึงสถานะรวมของระบบ (ยอดเงิน, รายการบริจาค, การตั้งค่า)
- * มีระบบ Memory Cache 3 วินาที เพื่อตอบกลับข้อมูลอย่างรวดเร็วระดับเสี้ยววินาที (<200ms)
+ * มีระบบ Memory Cache 2 วินาที เพื่อตอบกลับข้อมูลอย่างรวดเร็วระดับเสี้ยววินาที (<200ms)
  */
 function getState() {
   const cache = CacheService.getScriptCache();
@@ -348,12 +349,14 @@ function getState() {
     const cached = cache.get('CKP_STATE');
     if (cached) {
       const parsed = JSON.parse(cached);
-      // ตรวจสอบว่ามี Popup ที่รอเด้งอยู่หรือไม่
-      const pending = cache.get('PENDING_POPUP');
-      if (pending) {
-        parsed.pendingPopup = JSON.parse(pending);
-        cache.remove('PENDING_POPUP');
-      }
+      // แนบ latestPopup ล่าสุดจาก PropertiesService เสมอ
+      try {
+        const p = PropertiesService.getScriptProperties().getProperty('LATEST_POPUP');
+        if (p) {
+          parsed.latestPopup = JSON.parse(p);
+          parsed.pendingPopup = parsed.latestPopup;
+        }
+      } catch (err) {}
       return parsed;
     }
   } catch (e) {}
@@ -376,7 +379,12 @@ function getState() {
     const donorName = String(row[2] || 'ผู้มีจิตศรัทธา');
     const amount = parseFloat(row[3]) || 0;
     const note = String(row[4] || '');
-    const showPopup = String(row[5]).toUpperCase() === 'TRUE';
+
+    // สำคัญ: หากคอลัมน์แสดง Popup ว่าง หรือไม่มีค่า ให้ถือว่าต้องการแสดง Popup เป็นจริง (true)
+    const rawPopup = row[5];
+    const showPopup = (rawPopup === undefined || rawPopup === null || String(rawPopup).trim() === '')
+      ? true
+      : String(rawPopup).trim().toUpperCase() !== 'FALSE';
 
     calculatedSum += amount;
 
@@ -401,12 +409,11 @@ function getState() {
     sheetUrl = ss.getUrl();
   } catch (e) {}
 
-  let pendingPopup = null;
+  let latestPopup = null;
   try {
-    const p = cache.get('PENDING_POPUP');
+    const p = PropertiesService.getScriptProperties().getProperty('LATEST_POPUP');
     if (p) {
-      pendingPopup = JSON.parse(p);
-      cache.remove('PENDING_POPUP');
+      latestPopup = JSON.parse(p);
     }
   } catch (e) {}
 
@@ -414,14 +421,15 @@ function getState() {
     total: total,
     donations: donations,
     settings: settings,
-    pendingPopup: pendingPopup,
+    latestPopup: latestPopup,
+    pendingPopup: latestPopup,
     timestamp: new Date().toISOString(),
     sheetUrl: sheetUrl,
   };
 
   try {
-    // บันทึกลงแคช 3 วินาที เพื่อลดภาระการอ่าน Sheet ซ้ำซ้อน
-    cache.put('CKP_STATE', JSON.stringify(result), 3);
+    // บันทึกลงแคช 2 วินาที เพื่อลดภาระการอ่าน Sheet ซ้ำซ้อน
+    cache.put('CKP_STATE', JSON.stringify(result), 2);
   } catch (e) {}
 
   return result;
@@ -442,6 +450,20 @@ function addDonation(donorName, amount, note, showPopup) {
   const popupBool = showPopup !== false ? 'TRUE' : 'FALSE';
 
   sheet.appendRow([id, timestamp, donorName.trim() || 'ผู้มีจิตศรัทธา', amt, (note || '').trim(), popupBool]);
+
+  // บันทึกลง LATEST_POPUP ใน PropertiesService เสมอ เพื่อให้หน้าจอแสดงผลได้รับ Popup แน่นอน
+  if (showPopup !== false) {
+    try {
+      const popupData = {
+        id: id,
+        donorName: donorName.trim() || 'ผู้มีจิตศรัทธา',
+        amount: amt,
+        timestamp: timestamp,
+        duration: 5,
+      };
+      PropertiesService.getScriptProperties().setProperty('LATEST_POPUP', JSON.stringify(popupData));
+    } catch (e) {}
+  }
 
   // หากมีการตั้งค่า totalOverride ไว้ ให้บวกเพิ่มตาม
   const settings = getSettingsMap();

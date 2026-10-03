@@ -5,6 +5,17 @@ export const GOOGLE_SCRIPT_STORAGE_KEY = 'ckp_gas_web_app_url';
 
 export function getGoogleScriptUrl(): string {
   if (typeof window !== 'undefined') {
+    // Check URL query parameters first (e.g. ?gasUrl=https://script.google.com/...)
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlParam = params.get('gasUrl');
+      if (urlParam && urlParam.trim()) {
+        const clean = decodeURIComponent(urlParam.trim());
+        localStorage.setItem(GOOGLE_SCRIPT_STORAGE_KEY, clean);
+        return clean;
+      }
+    } catch {}
+
     const saved = localStorage.getItem(GOOGLE_SCRIPT_STORAGE_KEY);
     if (saved && saved.trim()) return saved.trim();
   }
@@ -59,7 +70,8 @@ async function callGoogleScript(action: string, payload: Record<string, any> = {
       Object.entries(payload).map(([k, v]) => [k, typeof v === 'object' ? JSON.stringify(v) : String(v)])
     ),
   });
-  const res = await fetch(`${gasUrl}?${params.toString()}`);
+  const sep = gasUrl.includes('?') ? '&' : '?';
+  const res = await fetch(`${gasUrl}${sep}${params.toString()}`);
   if (!res.ok) throw new Error(`Google Script request failed: ${res.status}`);
   return res.json();
 }

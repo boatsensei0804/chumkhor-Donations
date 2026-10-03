@@ -290,11 +290,11 @@ class SyncChannel {
         method: 'POST',
         headers: {
           'Content-Type': 'text/plain;charset=utf-8',
-          'Title': 'CKP-Donations',
-          'Priority': 'urgent',
         },
         body: JSON.stringify(wrapped),
-      }).catch(() => {});
+      }).catch((err) => {
+        console.warn('Realtime cloud publish warning:', err);
+      });
     } catch {}
 
     // 3. Local WebSocket (if development server)
